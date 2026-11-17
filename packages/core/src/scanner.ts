@@ -16,6 +16,7 @@ const DEFAULT_IGNORE = new Set([
   "venv",
   ".idea",
   ".vscode",
+  ".repolens",
 ]);
 
 export interface ScanOptions {
