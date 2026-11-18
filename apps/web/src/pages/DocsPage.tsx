@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import type { GeneratedDocs } from "@repolens/shared";
+import { MarkdownRenderer } from "../components/MarkdownRenderer.js";
 import styles from "./DocsPage.module.css";
 
 const API = "/api";
@@ -41,26 +42,27 @@ export function DocsPage() {
     }
   }
 
-  const tabs: { id: TabId; label: string }[] = [
-    { id: "readme", label: "README" },
-    { id: "setup", label: "Setup" },
-    { id: "architecture", label: "Architecture" },
-    ...(docs?.api ? [{ id: "api" as TabId, label: "API" }] : []),
+  const tabs: { id: TabId; label: string; icon: string }[] = [
+    { id: "readme",       label: "README",       icon: "📄" },
+    { id: "setup",        label: "Setup",         icon: "⚙️" },
+    { id: "architecture", label: "Architecture",  icon: "🏗️" },
+    ...(docs?.api ? [{ id: "api" as TabId, label: "API", icon: "🔌" }] : []),
   ];
 
-  const activeContent =
-    docs && activeTab === "readme"
-      ? docs.readme.content
-      : docs && activeTab === "setup"
-      ? docs.setup.content
-      : docs && activeTab === "architecture"
-      ? docs.architecture.content
-      : docs?.api?.content ?? "";
+  const activeSection =
+    !docs ? null
+    : activeTab === "readme"       ? docs.readme
+    : activeTab === "setup"        ? docs.setup
+    : activeTab === "architecture" ? docs.architecture
+    : docs.api;
 
   return (
     <div className={styles.container}>
       <h1 className={styles.title}>Generate Documentation</h1>
-      <p className={styles.subtitle}>Enter a repository path to scan and generate docs in one step.</p>
+      <p className={styles.subtitle}>
+        Enter a local repository path. RepoLens will scan the code and render
+        the architecture diagrams, module map, and class diagram inline.
+      </p>
 
       <div className={styles.form}>
         <input
@@ -71,8 +73,12 @@ export function DocsPage() {
           onChange={(e) => setRepoPath(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleGenerate()}
         />
-        <button className={styles.button} onClick={handleGenerate} disabled={loading || !repoPath.trim()}>
-          {loading ? "Generating..." : "Generate Docs"}
+        <button
+          className={styles.button}
+          onClick={handleGenerate}
+          disabled={loading || !repoPath.trim()}
+        >
+          {loading ? "Generating…" : "Generate Docs"}
         </button>
       </div>
 
@@ -87,11 +93,20 @@ export function DocsPage() {
                 className={activeTab === tab.id ? styles.tabActive : styles.tab}
                 onClick={() => setActiveTab(tab.id)}
               >
-                {tab.label}
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
               </button>
             ))}
+            <div className={styles.tabMeta}>
+              Generated {new Date(docs.generatedAt).toLocaleString()}
+            </div>
           </div>
-          <pre className={styles.content}>{activeContent}</pre>
+
+          <div className={styles.docContent}>
+            {activeSection && (
+              <MarkdownRenderer content={activeSection.content} />
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 .container {
-  max-width: 900px;
+  max-width: 960px;
 }
 
 .title {
@@ -11,6 +11,7 @@
 .subtitle {
   color: var(--text-muted);
   margin-bottom: 28px;
+  max-width: 620px;
 }
 
 .form {
@@ -79,21 +80,27 @@
 
 .tabs {
   display: flex;
+  align-items: center;
   border-bottom: 1px solid var(--border);
   padding: 0 16px;
-  gap: 4px;
+  gap: 2px;
+  overflow-x: auto;
 }
 
 .tab,
 .tabActive {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   background: none;
   border: none;
-  padding: 12px 16px;
+  padding: 12px 14px;
   font-size: 13px;
   cursor: pointer;
   color: var(--text-muted);
   border-bottom: 2px solid transparent;
   transition: color 0.15s;
+  white-space: nowrap;
 }
 
 .tab:hover {
@@ -106,14 +113,16 @@
   font-weight: 600;
 }
 
-.content {
-  padding: 24px;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 13px;
-  line-height: 1.8;
-  color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 600px;
+.tabMeta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding: 0 8px;
+}
+
+.docContent {
+  padding: 28px 32px;
+  max-height: 75vh;
   overflow-y: auto;
 }

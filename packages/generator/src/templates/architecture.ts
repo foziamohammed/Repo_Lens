@@ -1,107 +1,209 @@
-import type { ScanResult, DocSection, FileNode } from "@repolens/shared";
+import type { ScanResult, DocSection, FileNode, FunctionInfo, ClassInfo } from "@repolens/shared";
+import { MermaidGenerator } from "../mermaid-generator.js";
 
 export class ArchitectureTemplate {
+  private mermaid = new MermaidGenerator();
+
   render(scan: ScanResult, generatedAt: string): DocSection {
-    const { files, functions, classes, languages, meta } = scan;
+    const { files, functions, classes, languages, meta, dependencies, frameworks } = scan;
 
-    // Build a 2-level directory tree with file counts and size
-    const dirTree = this.buildDirTree(files);
+    const sourceFiles = files.filter((f) => f.language !== null);
+    const totalSize = files.reduce((s, f) => s + f.sizeBytes, 0);
 
-    // Per-directory breakdown: files, functions, classes
-    const dirFunctionMap: Record<string, string[]> = {};
-    for (const fn of functions) {
-      const dir = fn.filePath.split("/").slice(0, 2).join("/");
-      (dirFunctionMap[dir] ??= []).push(fn.name);
+    // Strip absolute path prefix so paths are relative throughout
+    const rootPrefix = meta.rootPath.replace(/\\/g, "/");
+    const toRelative = (p: string) =>
+      p.replace(/\\/g, "/").replace(rootPrefix + "/", "");
+
+    // --- Module / layer map ---
+    // Group files into top-level modules (apps/*, packages/*, root)
+    type Module = {
+      name: string;
+      description: string;
+      sourceFiles: number;
+      totalFiles: number;
+      sizeBytes: number;
+      submodules: Record<string, { files: number; sizeBytes: number }>;
+      classes: ClassInfo[];
+      functions: FunctionInfo[];
+    };
+
+    const modules: Record<string, Module> = {};
+
+    for (const file of files) {
+      const parts = file.path.split("/");
+      let moduleKey: string;
+      let subKey: string | null = null;
+
+      if (parts.length === 1) {
+        moduleKey = "(root)";
+      } else if (parts.length >= 3 && (parts[0] === "apps" || parts[0] === "packages")) {
+        moduleKey = `${parts[0]}/${parts[1]}`;
+        subKey = parts.length >= 4 ? parts[2] : null;
+      } else {
+        moduleKey = parts[0];
+        subKey = parts.length >= 3 ? parts[1] : null;
+      }
+
+      if (!modules[moduleKey]) {
+        modules[moduleKey] = {
+          name: moduleKey,
+          description: describeModule(moduleKey, dependencies),
+          sourceFiles: 0,
+          totalFiles: 0,
+          sizeBytes: 0,
+          submodules: {},
+          classes: [],
+          functions: [],
+        };
+      }
+
+      const mod = modules[moduleKey];
+      mod.totalFiles++;
+      mod.sizeBytes += file.sizeBytes;
+      if (file.language) mod.sourceFiles++;
+
+      if (subKey) {
+        mod.submodules[subKey] ??= { files: 0, sizeBytes: 0 };
+        mod.submodules[subKey].files++;
+        mod.submodules[subKey].sizeBytes += file.sizeBytes;
+      }
     }
 
-    const dirClassMap: Record<string, string[]> = {};
+    // Attach classes and functions to their module
     for (const cls of classes) {
-      const dir = cls.filePath.split("/").slice(0, 2).join("/");
-      (dirClassMap[dir] ??= []).push(cls.name);
+      const rel = toRelative(cls.filePath);
+      const parts = rel.split("/");
+      let moduleKey =
+        parts.length >= 3 && (parts[0] === "apps" || parts[0] === "packages")
+          ? `${parts[0]}/${parts[1]}`
+          : parts[0];
+      if (modules[moduleKey]) modules[moduleKey].classes.push(cls);
     }
 
-    // Largest files — exclude build artifacts and lock files
-    const ARTIFACT_EXTS = new Set([".tsbuildinfo", ".lock"]);
-    const ARTIFACT_NAMES = new Set(["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]);
-    const largestFiles = [...files]
-      .filter((f) => !ARTIFACT_EXTS.has(f.extension) && !ARTIFACT_NAMES.has(f.name))
-      .sort((a, b) => b.sizeBytes - a.sizeBytes)
-      .slice(0, 10);
-
-    const largestFileList = largestFiles
-      .map((f) => `| \`${f.path}\` | ${f.language ?? "—"} | ${this.formatBytes(f.sizeBytes)} |`)
-      .join("\n");
-
-    // All classes with their methods
-    const classDetail = classes
-      .slice(0, 30)
-      .map((c) => {
-        const methodList =
-          c.methods.length > 0
-            ? c.methods.map((m) => `  - \`${m}()\``).join("\n")
-            : "  - *(no methods detected)*";
-        return `### \`${c.name}\`\n\n- **File**: \`${c.filePath}\` (line ${c.startLine})\n- **Exported**: ${c.isExported ? "Yes" : "No"}\n- **Methods**:\n${methodList}`;
-      })
-      .join("\n\n");
-
-    // All functions grouped by file
-    const fnByFile: Record<string, typeof functions> = {};
     for (const fn of functions) {
-      (fnByFile[fn.filePath] ??= []).push(fn);
+      const rel = toRelative(fn.filePath);
+      const parts = rel.split("/");
+      let moduleKey =
+        parts.length >= 3 && (parts[0] === "apps" || parts[0] === "packages")
+          ? `${parts[0]}/${parts[1]}`
+          : parts[0];
+      if (modules[moduleKey]) modules[moduleKey].functions.push(fn);
     }
 
-    const functionDetail = Object.entries(fnByFile)
-      .slice(0, 25)
-      .map(([file, fns]) => {
-        const fnList = fns
-          .map((f) => {
-            const params = f.params.length > 0 ? f.params.join(", ") : "";
-            const flags = [f.isAsync ? "async" : "", f.isExported ? "exported" : ""]
-              .filter(Boolean)
-              .join(", ");
-            return `  - \`${f.name}(${params})\`${flags ? ` _(${flags})_` : ""} — line ${f.startLine}`;
-          })
-          .join("\n");
-        return `**\`${file}\`**\n${fnList}`;
+    // Sort modules: packages first, then apps, then root
+    const sortedModules = Object.values(modules).sort((a, b) => {
+      const rank = (m: Module) =>
+        m.name.startsWith("packages/") ? 0 : m.name.startsWith("apps/") ? 1 : 2;
+      return rank(a) - rank(b) || a.name.localeCompare(b.name);
+    });
+
+    // --- Build human-readable module sections ---
+    const moduleSections = sortedModules
+      .filter((m) => m.name !== "(root)")
+      .map((mod) => {
+        const classLines =
+          mod.classes.length > 0
+            ? mod.classes
+                .map((c) => {
+                  const methods = c.methods.length > 0 ? c.methods.join(", ") : "no public methods";
+                  return `  - **${c.name}** — ${methods}`;
+                })
+                .join("\n")
+            : null;
+
+        const fnLines =
+          mod.functions.filter((f) => f.isExported).length > 0
+            ? mod.functions
+                .filter((f) => f.isExported)
+                .map((f) => `  - **${f.name}**${f.isAsync ? " *(async)*" : ""}`)
+                .join("\n")
+            : null;
+
+        const subLines =
+          Object.keys(mod.submodules).length > 0
+            ? Object.entries(mod.submodules)
+                .sort((a, b) => b[1].files - a[1].files)
+                .map(([sub, info]) => `  - \`${sub}/\` — ${info.files} file${info.files !== 1 ? "s" : ""}`)
+                .join("\n")
+            : null;
+
+        const parts = [
+          `### ${mod.name}`,
+          "",
+          `> ${mod.description}`,
+          "",
+          `${mod.sourceFiles} source file${mod.sourceFiles !== 1 ? "s" : ""} · ${formatBytes(mod.sizeBytes)}`,
+        ];
+
+        if (subLines) {
+          parts.push("", "**Subdirectories**", subLines);
+        }
+        if (classLines) {
+          parts.push("", "**Classes**", classLines);
+        }
+        if (fnLines) {
+          parts.push("", "**Exported functions**", fnLines);
+        }
+
+        return parts.join("\n");
       })
-      .join("\n\n");
+      .join("\n\n---\n\n");
+
+    // --- Mermaid diagrams ---
+    const moduleFlowDiagram = this.mermaid.moduleFlowDiagram(sortedModules.map((m) => m.name));
+    const classDiagram = this.mermaid.classDiagram(classes, toRelative);
+
+    // --- At-a-glance stats ---
+    const exportedClasses = classes.filter((c) => c.isExported).length;
+    const exportedFunctions = functions.filter((f) => f.isExported).length;
 
     const content = `# Architecture Overview
 
-> Generated by RepoLens · ${generatedAt}  
-> Project: \`${meta.rootPath}\`
+> Generated by RepoLens · ${generatedAt}
 
-## Summary
+## At a Glance
 
-| Metric | Count |
-|--------|-------|
-| Total files | ${files.length} |
-| Source files | ${files.filter((f) => f.language !== null).length} |
-| Languages | ${Object.keys(languages).length} |
-| Directories (top-level) | ${new Set(files.map((f) => f.path.split("/")[0])).size} |
-| Functions | ${functions.length} |
-| Classes | ${classes.length} |
-| Total size | ${this.formatBytes(files.reduce((s, f) => s + f.sizeBytes, 0))} |
+| | |
+|---|---|
+| **Project** | ${meta.name} |
+| **Source files** | ${sourceFiles.length} of ${files.length} total |
+| **Languages** | ${Object.keys(languages).join(", ") || "—"} |
+| **Frameworks** | ${frameworks.length > 0 ? frameworks.join(", ") : "none detected"} |
+| **Modules** | ${sortedModules.filter((m) => m.name !== "(root)").length} |
+| **Classes** | ${classes.length} (${exportedClasses} exported) |
+| **Functions** | ${functions.length} (${exportedFunctions} exported) |
+| **Total size** | ${formatBytes(totalSize)} |
 
-## Directory Tree
+---
 
+## Module Map
+
+This diagram shows how the project's modules relate to each other.
+
+\`\`\`mermaid
+${moduleFlowDiagram}
 \`\`\`
-${dirTree}
+
+---
+
+## Module Breakdown
+
+${moduleSections}
+
+---
+
+## Class Diagram
+
+\`\`\`mermaid
+${classDiagram}
 \`\`\`
 
-## Largest Files
+---
 
-| File | Language | Size |
-|------|----------|------|
-${largestFileList}
+## Key Files
 
-## Classes (${classes.length})
-
-${classDetail || "_No classes detected._"}
-
-## Functions by File (${functions.length} total)
-
-${functionDetail || "_No functions detected._"}
+${topFiles(files)}
 `;
 
     return {
@@ -112,60 +214,50 @@ ${functionDetail || "_No functions detected._"}
       generatedAt,
     };
   }
+}
 
-  private buildDirTree(files: FileNode[]): string {
-    // Group into a nested structure up to depth 2
-    const tree: Record<string, Record<string, number>> = {};
+// ── helpers ──────────────────────────────────────────────────────────────────
 
-    for (const file of files) {
-      const parts = file.path.split("/");
-      if (parts.length === 1) {
-        // Root-level file — no directory
-        tree["(root)"] ??= {};
-        tree["(root)"]["__files__"] = (tree["(root)"]["__files__"] ?? 0) + 1;
-      } else {
-        const top = parts[0];
-        const sub = parts.length > 2 ? parts[1] : null;
-        tree[top] ??= {};
-        if (sub) {
-          tree[top][sub] = (tree[top][sub] ?? 0) + 1;
-        } else {
-          tree[top]["__files__"] = (tree[top]["__files__"] ?? 0) + 1;
-        }
-      }
-    }
+function describeModule(
+  key: string,
+  deps: { name: string }[]
+): string {
+  const descriptions: Record<string, string> = {
+    "apps/cli": "Command-line interface — the `repolens` binary users run in a terminal",
+    "apps/api": "REST API server — exposes scan and documentation endpoints to the web app",
+    "apps/web": "React web application — browse project structure, view and compare docs",
+    "packages/shared": "Shared TypeScript types used by every other package and app",
+    "packages/core": "File system scanner and language detection",
+    "packages/parser": "AST-based code parser for functions, classes, and dependencies",
+    "packages/analyzer": "Orchestrates the scan and parse steps, runs change detection",
+    "packages/generator": "Builds human-readable documentation from scan results",
+    docs: "Project-level documentation and guides",
+  };
+  return descriptions[key] ?? `${key.split("/").pop()} module`;
+}
 
-    const lines: string[] = [];
-    const topDirs = Object.keys(tree).sort();
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
 
-    for (const [i, dir] of topDirs.entries()) {
-      const isLastTop = i === topDirs.length - 1;
-      const topPrefix = isLastTop ? "└── " : "├── ";
-      const subs = Object.entries(tree[dir]).filter(([k]) => k !== "__files__");
-      const rootFiles = tree[dir]["__files__"] ?? 0;
-      const totalInDir = Object.values(tree[dir]).reduce((s, n) => s + n, 0);
+const ARTIFACT_EXTS = new Set([".tsbuildinfo", ".lock"]);
+const ARTIFACT_NAMES = new Set(["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]);
 
-      lines.push(`${topPrefix}${dir}/  (${totalInDir} file${totalInDir !== 1 ? "s" : ""})`);
+function topFiles(files: FileNode[]): string {
+  const interesting = files
+    .filter((f) => f.language !== null && !ARTIFACT_EXTS.has(f.extension))
+    .sort((a, b) => b.sizeBytes - a.sizeBytes)
+    .slice(0, 8);
 
-      const childPrefix = isLastTop ? "    " : "│   ";
+  if (interesting.length === 0) return "_No source files found._";
 
-      for (const [j, [sub, count]] of subs.entries()) {
-        const isLastSub = j === subs.length - 1 && rootFiles === 0;
-        const subPrefix = isLastSub ? "└── " : "├── ";
-        lines.push(`${childPrefix}${subPrefix}${sub}/  (${count} file${count !== 1 ? "s" : ""})`);
-      }
-
-      if (rootFiles > 0) {
-        lines.push(`${childPrefix}└── (${rootFiles} file${rootFiles !== 1 ? "s" : ""} at root)`);
-      }
-    }
-
-    return lines.join("\n");
-  }
-
-  private formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  }
+  return (
+    "| File | Language | Size |\n" +
+    "|------|----------|------|\n" +
+    interesting
+      .map((f) => `| \`${f.path}\` | ${f.language} | ${formatBytes(f.sizeBytes)} |`)
+      .join("\n")
+  );
 }

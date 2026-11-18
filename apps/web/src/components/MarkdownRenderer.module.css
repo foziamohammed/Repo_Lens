@@ -1,0 +1,117 @@
+.root {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.h1 {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text);
+  margin: 0 0 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 28px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 20px 0 8px;
+}
+
+.blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 6px 0 6px 16px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 8px 0;
+}
+
+.hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 24px 0;
+}
+
+.p {
+  margin: 4px 0;
+}
+
+.spacer {
+  height: 8px;
+}
+
+.listItem {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 3px 0;
+}
+
+.bullet {
+  color: var(--accent);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+/* Tables */
+.tableRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 1px 0;
+}
+
+.tableCell {
+  background: var(--surface);
+  padding: 7px 12px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tableCell:first-child {
+  font-weight: 500;
+}
+
+/* Code */
+.codeBlock {
+  background: #0a0c10;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  color: #98c379;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+.inlineCode {
+  background: rgba(108, 142, 247, 0.12);
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+}
+
+/* Mermaid diagram container */
+.diagramWrapper {
+  margin: 16px 0;
+}
